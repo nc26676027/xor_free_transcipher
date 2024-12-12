@@ -11,6 +11,7 @@ type BitSet struct {
     size  int
 }
 
+
 func NewBitSet(size int) *BitSet {
     return &BitSet{
         bits: make([]uint8, size),

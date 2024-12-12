@@ -20,18 +20,19 @@ var flagShort = flag.Bool("short", false, "run the example with a smaller and in
 func main() {
 
 	flag.Parse()
-	runtime.GOMAXPROCS(32)
+	runtime.GOMAXPROCS(64)
 	// Default LogN, which with the following defined parameters
 	// provides a security of 128-bit.
 
-	LogN := 13
-	LogDefaultScale := 34
+	LogN := 16
+	LogDefaultScale := 50
 
-	q0 := []int{36}                                    // 3) ScaleDown & 4) ModUp
-	qiSlotsToCoeffs := []int{32, 32}               // 1) SlotsToCoeffs
-	qiCircuitSlots := []int{34, 34, 34}           // 0) Circuit in the slot domain
-	qiEvalMod := []int{36, 36, 36, 36, 36, 36, 36} // 6) EvalMod
-	qiCoeffsToSlots := []int{34, 34, 34}           // 5) CoeffsToSlots
+	q0 := []int{51}                                    // 3) ScaleDown & 4) ModUp
+	qiSlotsToCoeffs := []int{48, 48, 48}               // 1) SlotsToCoeffs
+	// qiCircuitSlots := []int{35, 35, 35}           // 0) Circuit in the slot domain
+	qiCircuitSlots := []int{ 50, 50, 50, 50, 50, 50, 50, 50, 50, 50}           // 0) Circuit in the slot domain
+	qiEvalMod := []int{51, 51, 51, 51, 51, 51, 51} // 6) EvalMod
+	qiCoeffsToSlots := []int{48, 48, 48, 48}           // 5) CoeffsToSlots
 
 	LogQ := append(q0, qiSlotsToCoeffs...)
 	LogQ = append(LogQ, qiCircuitSlots...)
@@ -41,7 +42,7 @@ func main() {
 	params, err := ckks.NewParametersFromLiteral(ckks.ParametersLiteral{
 		LogN:            LogN,                                              // Log2 of the ring degree
 		LogQ:            LogQ, // Log2 of the ciphertext prime moduli
-		LogP:            []int{36, 36, 36, 36, 36},                                 // Log2 of the key-switch auxiliary prime moduli
+		LogP:            []int{50, 50, 51, 51, 51},                                 // Log2 of the key-switch auxiliary prime moduli
 		LogDefaultScale: LogDefaultScale,                                                // Log2 of the scale
 		Xs:              ring.Ternary{H: 192},
 	})
@@ -57,17 +58,17 @@ func main() {
 		LevelQ:       params.MaxLevelQ(),
 		LevelP:       params.MaxLevelP(),
 		LogBSGSRatio: 1,
-		Levels:       []int{1, 1, 1}, //qiCoeffsToSlots
+		Levels:       []int{1, 1, 1, 1}, //qiCoeffsToSlots
 	}
 
 	// Parameters of the homomorphic modular reduction x mod 1
 	Mod1ParametersLiteral := mod1.ParametersLiteral{
 		LevelQ:          params.MaxLevel() - CoeffsToSlotsParameters.Depth(true),
-		LogScale:        36,               // Matches qiEvalMod
+		LogScale:        51,               // Matches qiEvalMod
 		Mod1Type:        mod1.CosDiscrete, // Multi-interval Chebyshev interpolation
 		Mod1Degree:      126,               // Depth 5
 		DoubleAngle:     0,                // Depth 3
-		K:               12,               // With EphemeralSecretWeight = 32 and 2^{15} slots, ensures < 2^{-138.7} failure probability
+		K:               16,               // With EphemeralSecretWeight = 32 and 2^{15} slots, ensures < 2^{-138.7} failure probability
 		LogMessageRatio: 1,               // q/|m| = 2^10
 		Mod1InvDegree:   0,                // Depth 0
 	}
@@ -78,7 +79,7 @@ func main() {
 		LogSlots:     params.LogMaxSlots(),
 		LogBSGSRatio: 1,
 		LevelP:       params.MaxLevelP(),
-		Levels:       []int{1, 1}, // qiSlotsToCoeffs
+		Levels:       []int{1, 1, 1}, // qiSlotsToCoeffs
 	}
 
 	SlotsToCoeffsParameters.LevelQ = len(SlotsToCoeffsParameters.Levels)
@@ -157,7 +158,8 @@ func main() {
 	aes, _ := ckks_cipher.NewAESCtr(symmetricKey, params, btpParams, evk, encoder, encryptor, decryptor, iv) 
 	// Start1 := time.Now()
 	// aes.DebugTest(symmetricKey, 128 )
-	aes.HEDecrypt(symmetricKey, 128 )
+	// aes.HEDecrypt(symmetricKey, 128 )
+	aes.HEDecryptParam15(symmetricKey, 128 )
 	// aes.DebugPrint(ctxt[0], "\n\n Finished")
 	// end1 := time.Since(Start1)
 	// fmt.Printf("The Whole Decryption took %v\n", end1)

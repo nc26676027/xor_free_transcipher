@@ -287,11 +287,15 @@ func (eval Evaluator) BootstrapReal(ct *rlwe.Ciphertext) (*rlwe.Ciphertext, erro
 }
 
 // Bootstrap bootstraps a single ciphertext and returns the bootstrapped ciphertext.
-func (eval Evaluator) BootstrapCmplxThenDivide(ct *rlwe.Ciphertext) (*rlwe.Ciphertext, *rlwe.Ciphertext, error) {
-	ct0 := ct.CopyNew()
+func (eval Evaluator) BootstrapCmplxThenDivide(ctIn0, ctIn1 *rlwe.Ciphertext) (*rlwe.Ciphertext, *rlwe.Ciphertext, error) {
+	ct0 := ctIn0.CopyNew()
+	ct1 := ctIn1.CopyNew()
+	eval.Mul(ct1, 1i, ct1)
+	eval.Add(ct0, ct1, ct0)
 	// Step 1 : SlotsToCoeffs (Homomorphic decoding)
 	var err error
 	if ct0.Level() < eval.SlotsToCoeffsParameters.LevelQ {
+		fmt.Println("StC level: ", eval.SlotsToCoeffsParameters.LevelQ, "Current Level: ", ct0.Level())
 		panic("Level available < S2C.Level!")
 	}
 	for ct0.Level() > eval.SlotsToCoeffsParameters.LevelQ {

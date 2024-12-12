@@ -64,13 +64,8 @@ func BootstrapBatch(eval *bootstrapping.Evaluator, ct0, ct1 *rlwe.Ciphertext ) (
 	// for ct.Level() > 1 {
 	// 	rtb.DropLevel(ct, 1)
 	// }
-	ct1Cmplx, err := eval.MulNew(ct1, 1i)
-	if err != nil {
-		fmt.Println("Level after to img: ", ct1.Level())
-		panic(err)
-	}
-	Cmplx, err := eval.AddNew(ct0, ct1Cmplx)
-	ctOut1, ctOut2, err = eval.BootstrapCmplxThenDivide(Cmplx)	
+	var err error
+	ctOut1, ctOut2, err = eval.BootstrapCmplxThenDivide(ct0, ct1)	
 	if err != nil {
 		panic(err)
 	}
@@ -165,21 +160,13 @@ func Power(eval *bootstrapping.Evaluator, op *rlwe.Ciphertext, degree int, opOut
 
 // Boolean function XOR using CKKS scheme
 func XOR(eval *bootstrapping.Evaluator, ct0, ct1, ctOut *rlwe.Ciphertext) {
-	ct, err := eval.SubNew(ct0, ct1)
-	if err != nil {
-		panic(err)
-	}
-	err = eval.MulRelin(ctOut, ct, ct)
-	if err != nil {
-		panic(err)
-	}
-	eval.Rescale(ctOut, ctOut)
-	
-	return 
+	eval.Sub(ct0, ct1, ct0)
+	eval.MulRelin(ct0, ctOut, ctOut)
+	eval.Rescale(ctOut, ctOut) 
 }
 
 // Boolean function XORNew using CKKS scheme
-func XORNew(eval *bootstrapping.Evaluator, ct0, ct1 *rlwe.Ciphertext) (*rlwe.Ciphertext) {
+func XORNew(eval *bootstrapping.Evaluator, ct0, ct1 *rlwe.Ciphertext)  *rlwe.Ciphertext {
 	ct, err := eval.SubNew(ct0, ct1)
 	if err != nil {
 		panic(err)
@@ -274,7 +261,7 @@ func ORNew(eval *bootstrapping.Evaluator, ct0, ct1 *rlwe.Ciphertext ) ( ctOut *r
   	return
 }
 
-func CleanReal(eval *bootstrapping.Evaluator, ct *rlwe.Ciphertext){
+func CleanReal(eval *bootstrapping.Evaluator, ct *rlwe.Ciphertext) {
 	squ := PowerNew(eval, ct, 2)
 	cube, err := eval.MulRelinNew(squ, ct)
 	if err != nil {
@@ -346,7 +333,7 @@ func ConstructNumberFromBits(eval *bootstrapping.Evaluator, cts []*rlwe.Cipherte
 }
 
 func (rtb *RtBCipher) DebugPrint(ct *rlwe.Ciphertext, descriptor string) {
-	fmt.Printf("Chain Index: %d, Scale: %.2f\n", ct.Level(), ct.LogScale() )
+	fmt.Printf("Chain Index: %d, Scale: %.6f\n", ct.Level(), ct.LogScale() )
 	valuesTest := make([]float64, ct.Slots())
 	if err := rtb.Decode(rtb.decryptor.DecryptNew(ct), valuesTest); err != nil {
 		panic(err)
