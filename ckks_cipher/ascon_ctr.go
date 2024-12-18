@@ -11,7 +11,7 @@ import (
 	"github.com/tuneinsight/lattigo/v6/schemes/ckks"
 )
 
-type AESCtr struct {
+type Ascon struct {
     *RtBCipher
 	iv         	[]byte
     blockSize	int
@@ -23,12 +23,12 @@ type AESCtr struct {
 	allZeroIn	bool
 }
 
-func NewAESCtr(key_ []uint8, params_ ckks.Parameters, btpParams_ bootstrapping.Parameters, btpKey_ *bootstrapping.EvaluationKeys, encoder_ *ckks.Encoder, encryptor_ *rlwe.Encryptor, decryptor_ *rlwe.Decryptor, iv_ []byte) (*AESCtr, error) {
+func NewAscon(key_ []uint8, params_ ckks.Parameters, btpParams_ bootstrapping.Parameters, btpKey_ *bootstrapping.EvaluationKeys, encoder_ *ckks.Encoder, encryptor_ *rlwe.Encryptor, decryptor_ *rlwe.Decryptor, iv_ []byte) (*Ascon, error) {
     rtb, err := NewRtBCipher(key_, params_, btpParams_, btpKey_, encoder_, encryptor_, decryptor_)
     if err!= nil {
         return nil, err
     }
-    aes := &AESCtr{
+    aes := &Ascon{
         RtBCipher: 	rtb,
         blockSize:	128,
 		keySize: 	128,
@@ -36,25 +36,11 @@ func NewAESCtr(key_ []uint8, params_ ckks.Parameters, btpParams_ bootstrapping.P
         iv:         iv_,
 		allZeroIn: 	true, //debug mode
     }
-	var monomialOrder []*BitSet
-    for i := 0; i < 8; i++ {
-        x := NewBitSet(8)
-		x.Set(1<<i)
-        monomialOrder = append(monomialOrder, x)
-    }
-
-    aes.sboxMonomialOrder, _ = LayeredCombineBin(monomialOrder)
-
-    for i := 0; i < 256; i++ {
-		tmp := NewBitSet(8)
-		tmp.Set( int(AESSbox[i]) )
-        aes.bitSbox = append(aes.bitSbox, tmp)
-    }
 
 	return aes, err
 }
 
-func (aes *AESCtr) DebugTest(ciphertexts []byte, bits int) ([]*rlwe.Ciphertext, error) {
+func (aes *Ascon) DebugTest(ciphertexts []byte, bits int) ([]*rlwe.Ciphertext, error) {
 	if aes.allZeroIn {
 		bits = aes.params.MaxSlots() * aes.blockSize
 	}
@@ -66,7 +52,6 @@ func (aes *AESCtr) DebugTest(ciphertexts []byte, bits int) ([]*rlwe.Ciphertext, 
 	aes.EncryptInput(iv, numBlocks)
 	state := aes.inputEncrypted
 
-
 	fmt.Println("aes.totalLevel", aes.totalLevel)
 	fmt.Println("aes.remain", aes.remainingLevel)
 	for i := 0; i < len(state); i++ {
@@ -77,7 +62,7 @@ func (aes *AESCtr) DebugTest(ciphertexts []byte, bits int) ([]*rlwe.Ciphertext, 
 
 		aes.DropLevel(state[i], aes.totalLevel-aes.remainingLevel)
 	}
-	// aes.DebugPrint(state[0], "Level")
+	aes.DebugPrint(state[0], "Level")
 	// // aes.Evaluator.Add(state[0], state[0], state[0])
 	// for i:=0;i<8;i++{
 	// 	aes.DebugPrint(state[i], "before Bootstrap bits: \n")
@@ -85,37 +70,36 @@ func (aes *AESCtr) DebugTest(ciphertexts []byte, bits int) ([]*rlwe.Ciphertext, 
 	// aes.aesRoundFunction(state[:], aes.keyEncrypted)
 	Start := time.Now()
 
-	ch := make(chan bool, 64)
-	for i:=0; i<64; i++ {
+	ch := make(chan bool, 16)
+	fmt.Println("len(state): ", len(state))
+	for i:=0; i<16; i++ {
 		go func(i int) {
 			evalCopy := aes.Evaluator.ShallowCopy()
-			state[i], state[64 + i], _ = evalCopy.BootstrapCmplxThenDivide(state[i], state[64 + i])
-			if i == 0 {
-				aes.DebugPrint(state[i], "BTS precise: ")
-			}
+			aes.aesSubbyteLUT(evalCopy, state[i*8 : (i+1)*8])
 			ch <- true
 		}(i)
 	}
-	for i := 0; i < 64; i++ {
+	for i := 0; i < 16; i++ {
 		<-ch
-	}	
+	}
 
+	// aes.RoundFunction(evals, state, aes.keyEncrypted)
 	elasp := time.Since(Start)
 	fmt.Println("\n\n\n\nOne round time: ", elasp)
 	// valuesTest := (*aes.encoder).DecodeComplex( (*aes.decryptor).DecryptNew(state[0]), aes.params.LogSlots())
 	// fmt.Println("BootReEnc debug")
 	// PrintVectorTrunc(valuesTest, 7, 3)
-	// for i:=0;i<8;i++{
-	// 	aes.DebugPrint(state[i], "0~after btp")
+	for i:=0;i<8;i++{
+		aes.DebugPrint(state[i], "0~after btp")
 		
-	// }
+	}
 	// for i:=0;i<8;i++{
 	// 	aes.DebugPrint(state[i], "After One Round: \n")
 	// }
 	return state, nil
 }
 
-func (aes *AESCtr) HEDecrypt(ciphertexts []uint8, bits int) []*rlwe.Ciphertext {
+func (aes *Ascon) HEDecrypt(ciphertexts []uint8, bits int) []*rlwe.Ciphertext {
 	if aes.allZeroIn {
 		bits = aes.params.MaxSlots() * aes.blockSize
 	}
@@ -173,7 +157,7 @@ func (aes *AESCtr) HEDecrypt(ciphertexts []uint8, bits int) []*rlwe.Ciphertext {
 }
 
 
-func (aes *AESCtr) HEDecryptParam15(ciphertexts []uint8, bits int) []*rlwe.Ciphertext {
+func (aes *Ascon) HEDecryptParam15(ciphertexts []uint8, bits int) []*rlwe.Ciphertext {
 	if aes.allZeroIn {
 		bits = aes.params.MaxSlots() * aes.blockSize
 	}
@@ -230,7 +214,7 @@ func (aes *AESCtr) HEDecryptParam15(ciphertexts []uint8, bits int) []*rlwe.Ciphe
 	return state
 }
 
-func (aes *AESCtr) EncryptKey() {
+func (aes *Ascon) EncryptKey() {
     if aes.encoder == nil || aes.encryptor == nil {
         panic("encoder or encryptor is not initialized")
     }
@@ -260,7 +244,7 @@ func (aes *AESCtr) EncryptKey() {
     // fmt.Println("Encryption completed")
 }
 
-func (aes *AESCtr) EncryptInput(iv *BitSet, numBlock int) {
+func (aes *Ascon) EncryptInput(iv *BitSet, numBlock int) {
 	aes.inputEncrypted = make([]*rlwe.Ciphertext, aes.blockSize)
 	inputData := make([]*BitSet, aes.params.MaxSlots() )
 	for i, block := range inputData{
@@ -287,7 +271,7 @@ func (aes *AESCtr) EncryptInput(iv *BitSet, numBlock int) {
 	if aes.inputEncrypted[0] == nil {panic("input is not stored in aesStruct")}
 }
 
-func (aes *AESCtr) EncodeCiphertext(ciphertexts []uint8, numBlock int) {
+func (aes *Ascon) EncodeCiphertext(ciphertexts []uint8, numBlock int) {
 	aes.encodeCipher = make([]*rlwe.Ciphertext, aes.blockSize)
 	if numBlock < aes.params.MaxSlots() {
 		fmt.Println("data is not full pack, fill with 0...")
@@ -326,7 +310,7 @@ func (aes *AESCtr) EncodeCiphertext(ciphertexts []uint8, numBlock int) {
 
 }
 
-func (aes *AESCtr) RoundFunction( state []*rlwe.Ciphertext, roundKey []*rlwe.Ciphertext) {
+func (aes *Ascon) RoundFunction( state []*rlwe.Ciphertext, roundKey []*rlwe.Ciphertext) {
 	// SubByte
 	fmt.Printf("Chain index before sbox: %d, scale: %f\n", state[77].Level(), state[77].LogScale() )
 	ch := make(chan bool, 16)
@@ -365,7 +349,7 @@ func (aes *AESCtr) RoundFunction( state []*rlwe.Ciphertext, roundKey []*rlwe.Cip
 	}
 }
 
-func (aes *AESCtr) LastRound( state []*rlwe.Ciphertext, roundKey []*rlwe.Ciphertext) {
+func (aes *Ascon) LastRound( state []*rlwe.Ciphertext, roundKey []*rlwe.Ciphertext) {
 	fmt.Printf("Chain index before sbox: %d, scale: %f\n", state[0].Level(), state[0].LogScale() )
 	ch := make(chan bool, 16)
 	for i := 0; i < 16; i++ {
@@ -400,7 +384,7 @@ func (aes *AESCtr) LastRound( state []*rlwe.Ciphertext, roundKey []*rlwe.Ciphert
 
 }
 
-func (aes *AESCtr) RoundFunctionParam15( state []*rlwe.Ciphertext, roundKey []*rlwe.Ciphertext) {
+func (aes *Ascon) RoundFunctionParam15( state []*rlwe.Ciphertext, roundKey []*rlwe.Ciphertext) {
 	// SubByte first round
 	ch := make(chan bool, 16)
 	for i := 0; i < 16; i++ {
@@ -470,7 +454,7 @@ func (aes *AESCtr) RoundFunctionParam15( state []*rlwe.Ciphertext, roundKey []*r
 	aes.DebugPrint(state[0], "BTS precise: ")
 }
 
-func (aes *AESCtr) LastRoundParam15( state []*rlwe.Ciphertext, roundKey []*rlwe.Ciphertext) {
+func (aes *Ascon) LastRoundParam15( state []*rlwe.Ciphertext, roundKey []*rlwe.Ciphertext) {
 	// SubByte first round
 	ch := make(chan bool, 16)
 	for i := 0; i < 16; i++ {
@@ -532,7 +516,7 @@ func (aes *AESCtr) LastRoundParam15( state []*rlwe.Ciphertext, roundKey []*rlwe.
 	}
 }
 
-func (aes *AESCtr) coefficientMultMonomial(eval *bootstrapping.Evaluator, mon []*rlwe.Ciphertext, coeffArr []int, pos int) ( ctOut *rlwe.Ciphertext ) {
+func (aes *Ascon) coefficientMultMonomial(eval *bootstrapping.Evaluator, mon []*rlwe.Ciphertext, coeffArr []int, pos int) ( ctOut *rlwe.Ciphertext ) {
     if len(mon)!= len(aes.sboxMonomialOrder) {
 		panic("monomial size must equal to sbox_monomial_order!")
     }
@@ -566,7 +550,7 @@ func (aes *AESCtr) coefficientMultMonomial(eval *bootstrapping.Evaluator, mon []
     return 
 }
 
-func (aes *AESCtr) aesSubbyteLUT(eval *bootstrapping.Evaluator, SBoxIn []*rlwe.Ciphertext) {
+func (aes *Ascon) aesSubbyteLUT(eval *bootstrapping.Evaluator, SBoxIn []*rlwe.Ciphertext) {
     // construct 8-bit val of the sbox
     if len(SBoxIn)!= 8 {
 		panic("The input length of the Sbox is wrong (8bit)!!")
@@ -583,23 +567,8 @@ func (aes *AESCtr) aesSubbyteLUT(eval *bootstrapping.Evaluator, SBoxIn []*rlwe.C
     SBoxIn[7] = aes.coefficientMultMonomial(eval, sboxMonomials, Sbox7[:], 7)
 }
 
-func GF2FieldMul( eval *bootstrapping.Evaluator, x []*rlwe.Ciphertext) {
-    y := make([]*rlwe.Ciphertext, len(x))
-    for i := 0; i < 4; i++ {
-        y[0+8*i] = x[1+8*i]
-        y[1+8*i] = x[2+8*i]
-        y[2+8*i] = x[3+8*i]
-        y[3+8*i] = XORNew(eval, x[4+8*i], x[0+8*i])
-        y[4+8*i] = XORNew(eval, x[5+8*i], x[0+8*i])
-        y[5+8*i] = x[6+8*i]
-        y[7+8*i] = x[0+8*i]
-		y[6+8*i] = XORNew(eval, x[7+8*i], x[0+8*i])
-    }
-	copy(x, y)
-}
 
-
-func (aes *AESCtr) MixColumn( x []*rlwe.Ciphertext ) {
+func (aes *Ascon) MixColumn( x []*rlwe.Ciphertext ) {
 	x0, x1, x2, x3 := []*rlwe.Ciphertext{}, []*rlwe.Ciphertext{}, []*rlwe.Ciphertext{}, []*rlwe.Ciphertext{}
 	
 	for i := 0; i < 128; i++ {
@@ -673,7 +642,7 @@ func (aes *AESCtr) MixColumn( x []*rlwe.Ciphertext ) {
 
 }
 
-func (aes *AESCtr) ShiftRow(x []*rlwe.Ciphertext) {
+func (aes *Ascon) ShiftRow(x []*rlwe.Ciphertext) {
 	for i := 0; i < 8; i++ {
 		x[1*8+i], x[5*8+i], x[9*8+i], x[13*8+i] = x[5*8+i], x[9*8+i], x[13*8+i], x[1*8+i]
 		x[2*8+i], x[10*8+i], x[14*8+i], x[6*8+i] = x[10*8+i], x[14*8+i], x[6*8+i], x[2*8+i]
@@ -681,7 +650,7 @@ func (aes *AESCtr) ShiftRow(x []*rlwe.Ciphertext) {
 	}
 }
 
-func (aes *AESCtr) AddWhiteKey( pt, key []*rlwe.Ciphertext)  []*rlwe.Ciphertext {
+func (aes *Ascon) AddWhiteKey( pt, key []*rlwe.Ciphertext)  []*rlwe.Ciphertext {
 	ch := make(chan bool, 128)
 	for i := 0; i < 128; i++ {
 		go func(i int) {
@@ -697,7 +666,7 @@ func (aes *AESCtr) AddWhiteKey( pt, key []*rlwe.Ciphertext)  []*rlwe.Ciphertext 
 	return pt
 }
 
-func (aes *AESCtr) AddRoundKey( state, key []*rlwe.Ciphertext) {
+func (aes *Ascon) AddRoundKey( state, key []*rlwe.Ciphertext) {
 	ch := make(chan bool, 128)
 	for i := 0; i < 128; i++ {
 		go func(i int) {
@@ -713,28 +682,13 @@ func (aes *AESCtr) AddRoundKey( state, key []*rlwe.Ciphertext) {
 }
 
 // Free XOR components**************************************
-func (aes *AESCtr) FreeAddRoundKey( state, key []*rlwe.Ciphertext) {
+func (aes *Ascon) FreeAddRoundKey( state, key []*rlwe.Ciphertext) {
 	for i := 0; i < len(state); i++ {
 		FXOR(aes.Evaluator, state[i], key[i], state[i])
 	}
 }
 
-func FreeGF2FieldMul( eval *bootstrapping.Evaluator, x []*rlwe.Ciphertext) {
-    y := make([]*rlwe.Ciphertext, len(x))
-    for i := 0; i < 4; i++ {
-        y[0+8*i] = x[1+8*i]
-        y[1+8*i] = x[2+8*i]
-        y[2+8*i] = x[3+8*i]
-        y[3+8*i] = FXORNew(eval, x[4+8*i], x[0+8*i])
-        y[4+8*i] = FXORNew(eval, x[5+8*i], x[0+8*i])
-        y[5+8*i] = x[6+8*i]
-        y[7+8*i] = x[0+8*i]
-		y[6+8*i] = FXORNew(eval, x[7+8*i], x[0+8*i])
-    }
-	copy(x, y)
-}
-
-func (aes *AESCtr) FreeMixColumn( x []*rlwe.Ciphertext ) {
+func (aes *Ascon) FreeMixColumn( x []*rlwe.Ciphertext ) {
 	x0, x1, x2, x3 := []*rlwe.Ciphertext{}, []*rlwe.Ciphertext{}, []*rlwe.Ciphertext{}, []*rlwe.Ciphertext{}
 	
 	for i := 0; i < 128; i++ {
