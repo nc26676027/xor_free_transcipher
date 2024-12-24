@@ -12,7 +12,7 @@ import (
 func main() {
 
 	flag.Parse()
-	runtime.GOMAXPROCS(64)
+	runtime.GOMAXPROCS(32)
 	// Default LogN, which with the following defined parameters
 	// provides a security of 128-bit.
 	ckks_cipher.AESParam14()

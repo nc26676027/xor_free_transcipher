@@ -296,8 +296,8 @@ func AESParam14() {
         0x00, 0x00, 0x00, 0x00,
     }
 	aes, _ := NewAESCtr(symmetricKey, params, btpParams, evk, encoder, encryptor, decryptor, iv) 
-	// aes.HEDecrypt(symmetricKey, 128 )
-	aes.DebugTest(symmetricKey, 128)
+	aes.HEDecrypt(symmetricKey, 128 )
+	// aes.DebugTest(symmetricKey, 128)
 }
 
 func AESParam15() {
