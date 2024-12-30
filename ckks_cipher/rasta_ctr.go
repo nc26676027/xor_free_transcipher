@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/tuneinsight/lattigo/v6/circuits/ckks/bootstrapping"
@@ -17,29 +18,50 @@ type RastaCTR struct {
     blockSize	int
 	keySize	    int
 	rounds		int
-	// bitIndex   	[]*BitSet
-    bitSbox	   	[]*BitSet
-    sboxMonomialOrder	[]*BitSet
+	RandMatrix  [][][]float64
+	RandVec     [][]float64
 	allZeroIn	bool
 }
 
 func NewRastaCTR(key_ []uint8, params_ ckks.Parameters, btpParams_ bootstrapping.Parameters, btpKey_ *bootstrapping.EvaluationKeys, encoder_ *ckks.Encoder, encryptor_ *rlwe.Encryptor, decryptor_ *rlwe.Decryptor, iv_ []byte) (*RastaCTR, error) {
     rtb, err := NewRtBCipher(key_, params_, btpParams_, btpKey_, encoder_, encryptor_, decryptor_)
-    if err!= nil {
+    round := 6
+	if err!= nil {
         return nil, err
     }
+	Matrices := make([][][]float64, round+1)
+	Vectors := make([][]float64, round+1)
+	for i := 0; i < round+1; i++{
+		row := 351
+		for {
+			mat := generateRandomMatrix(row, row)
+			if rankOfMatrix( mat ) == uint(row) {
+				Matrices[i] = ToFloatMat(mat)
+				break
+			}
+		}
+
+	}
+	for i := 0; i < round+1; i++{
+		row := 351
+		vec := generateRandomVector(row)
+			Vectors[i] = ToFloatVec(vec)
+	}
+
     rasta := &RastaCTR{
         RtBCipher: 	rtb,
         blockSize:	351,
 		keySize: 	351,
-		rounds:		6,
+		rounds:		round,
         iv:         iv_,
+		RandMatrix: Matrices,
+		RandVec: 	Vectors,
 		allZeroIn: 	true, //debug mode
     }
 	return rasta, err
 }
 
-func (rasta *RastaCTR) DebugTest(ciphertexts []byte, bits int) ([]*rlwe.Ciphertext, error) {
+func (rasta *RastaCTR) DebugTest(ciphertexts []byte, bits int, integ int) ([]*rlwe.Ciphertext, error) {
 	if rasta.allZeroIn {
 		bits = rasta.params.MaxSlots() * rasta.blockSize
 	}
@@ -47,7 +69,6 @@ func (rasta *RastaCTR) DebugTest(ciphertexts []byte, bits int) ([]*rlwe.Cipherte
 
 	iv := NewBitSet(rasta.blockSize)
 	iv.Set(0) // set iv all zero
-	rasta.EncryptKey()
 	rasta.EncryptInput(iv, numBlocks)
 	state := rasta.inputEncrypted
 
@@ -66,13 +87,47 @@ func (rasta *RastaCTR) DebugTest(ciphertexts []byte, bits int) ([]*rlwe.Cipherte
 
 	Start := time.Now()
 
-	elasp := time.Since(Start)
-	fmt.Println("\n\n\n\nOne round time: ", elasp)
+	ch := make(chan bool, 128)
+	for i := 0; i < 128; i++ {
+		go func(i int) {
+			evalCopy := rasta.Evaluator.ShallowCopy()
+			evalCopy.Mul(state[i], integ, state[i])
+			ch <- true
+		}(i)
+	}
+	for i := 0; i < 128; i++ {
+		<-ch
+	}	
+	for i:=0;i<8;i++{
+		rasta.DebugPrint(state[i], "After Mul")
+	}
+
+	ch = make(chan bool, 64) // 设置缓冲通道避免阻塞
+
+	for i := 0; i < 64; i++ {
+		go func(i int) {
+			evalCopy := rasta.Evaluator.ShallowCopy()
+			state[i], state[64+i], _ = evalCopy.BootstrapCmplxThenDivide(state[i], state[64+i])
+			if i == 0 {
+				rasta.DebugPrint(state[i], "BTS precise: ")
+			}
+			ch <- true
+		}(i)
+	}
+	for i := 0; i < 64; i++ {
+		<-ch
+	}
 
 	for i:=0;i<8;i++{
-		rasta.DebugPrint(state[i], "0~after btp")
-		
+		rasta.DebugPrint(state[i], "After ParityBoot: ")
 	}
+
+	for i:=0; i<len(state); i++{
+		rasta.FailureCheck(state[i], " checking ... ")
+	}
+
+	elasp := time.Since(Start)
+	fmt.Println("\n\n\n\nOne round time: ", elasp)
 
 	return state, nil
 }
@@ -89,7 +144,7 @@ func (rasta *RastaCTR) HEDecrypt(ciphertexts []uint8, bits int) []*rlwe.Cipherte
 
 	for i := 0; i < len(rasta.inputEncrypted); i++ {
 		if rasta.inputEncrypted[i].Level() > rasta.remainingLevel   {
-			rasta.Evaluator.DropLevel(rasta.inputEncrypted[i], rasta.inputEncrypted[i].Level() - rasta.remainingLevel  )
+			rasta.Evaluator.DropLevel(rasta.inputEncrypted[i], rasta.inputEncrypted[i].Level() - rasta.remainingLevel + 3 )
 		}
 	}
 
@@ -97,7 +152,8 @@ func (rasta *RastaCTR) HEDecrypt(ciphertexts []uint8, bits int) []*rlwe.Cipherte
 	// AES encryption **********************************************
 	// state := rasta.AddWhiteKey( rasta.inputEncrypted, rasta.keyEncrypted )
 	state := rasta.inputEncrypted
-	for i := 1; i < 2; i++ {
+	rasta.FirstMatrix(state)
+	for i := 1; i < 7; i++ {
 		fmt.Printf("round iterator : %d\n", i)
 		rasta.RoundFunction(state)
 	}
@@ -236,56 +292,94 @@ func (cipher *RastaCTR) RoundFunction( state []*rlwe.Ciphertext ) {
 	for i := 0; i < 351; i++ {
 		go func(i int) {
 			evalCopy := cipher.Evaluator.ShallowCopy()
-			stateCopy[i], _ = evalCopy.MulRelinNew(state[(i+1)%351], state[(i+2)%351])
-			evalCopy.Rescale(stateCopy[i], stateCopy[i])
-			stateCopy[i], _ = evalCopy.AddNew(stateCopy[i], state[(i+2)%351])
+			stateCopy[i] = ANDNew(evalCopy, state[(i+1)%351], state[(i+2)%351])
+			stateCopy[i] = XORNew(evalCopy, stateCopy[i], state[(i+2)%351])
 			ch <- true
 		}(i)
 	}
 	for i := 0; i < 351; i++ {
 		<-ch
 	}
-
-	for i:=0;i<351;i++{
-		state[i], _ = cipher.Evaluator.AddNew(stateCopy[i], state[i])
+	for i := 0; i < 351; i++ {
+		go func(i int) {
+			evalCopy := cipher.Evaluator.ShallowCopy()
+			state[i] = XORNew(evalCopy, stateCopy[i], state[i])
+			ch <- true
+		}(i)
+	}
+	for i := 0; i < 351; i++ {
+		<-ch
 	}
 	stateCopy = nil
 
+	cipher.DebugPrint(state[0], "After SBox")
 	// MixColumn
 	cipher.FreeMixColumn( state )
 	cipher.DebugPrint(state[0], "After mixcolumn")
 	fmt.Printf("MixColumn Chain: %d, scale: %f\n", state[0].Level(), state[0].LogScale() )
 	// Parallel processing for bootstrapping and cleaning tensor
-	ch = make(chan bool, 175)
-	for i:=0; i<175; i++ {
+	var wg sync.WaitGroup
+	ch = make(chan bool, 176) // 设置缓冲通道避免阻塞
+	// 并行处理前175个元素
+	for i := 0; i < 175; i++ {
+		wg.Add(1)
 		go func(i int) {
+			defer wg.Done()
+
 			evalCopy := cipher.Evaluator.ShallowCopy()
-			state[i], state[175 + i], _ = evalCopy.BootstrapCmplxThenDivide(state[i], state[175 + i])
+			state[i], state[175+i], _ = evalCopy.BootstrapCmplxThenDivide(state[i], state[175+i])
 			if i == 0 {
 				cipher.DebugPrint(state[i], "BTS precise: ")
 			}
 			ch <- true
 		}(i)
 	}
-	for i := 0; i < 175; i++ {
-		<-ch
-	}
+	// 并行处理第350个元素
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		evalCopy := cipher.Evaluator.ShallowCopy()
+		state[350], _ = evalCopy.BootstrapReal(state[350])
+		ch <- true
+	}()
+	wg.Wait() // 等待所有goroutine完成
+	close(ch) // 关闭通道以防止泄漏
+
 }
 
-func (cipher *RastaCTR) AddWhiteKey( pt, key []*rlwe.Ciphertext)  []*rlwe.Ciphertext {
-	ch := make(chan bool, len(pt))
-	for i := 0; i < len(pt); i++ {
+func (cipher *RastaCTR) FirstMatrix( state []*rlwe.Ciphertext ) {
+	// MixColumn
+	cipher.FreeMixColumn( state )
+	cipher.DebugPrint(state[0], "After mixcolumn")
+	fmt.Printf("MixColumn Chain: %d, scale: %f\n", state[0].Level(), state[0].LogScale() )
+	// Parallel processing for bootstrapping and cleaning tensor
+	var wg sync.WaitGroup
+	ch := make(chan bool, 176) // 设置缓冲通道避免阻塞
+	// 并行处理前175个元素
+	for i := 0; i < 175; i++ {
+		wg.Add(1)
 		go func(i int) {
+			defer wg.Done()
 			evalCopy := cipher.Evaluator.ShallowCopy()
-			pt[i] = XORNew(evalCopy, pt[i], key[i])
-			evalCopy.ScaleUp(pt[i], rlwe.NewScale(2), pt[i])
+			state[i], state[175+i], _ = evalCopy.BootstrapCmplxThenDivide(state[i], state[175+i])
+			if i == 0 {
+				cipher.DebugPrint(state[i], "BTS precise: ")
+			}
 			ch <- true
 		}(i)
 	}
-	for i := 0; i < len(pt); i++ {
-		<-ch
-	}	
-	return pt
+	// 并行处理第350个元素
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		evalCopy := cipher.Evaluator.ShallowCopy()
+		state[350], _ = evalCopy.BootstrapReal(state[350])
+		ch <- true
+	}()
+	wg.Wait() // 等待所有goroutine完成
+	close(ch) // 关闭通道以防止泄漏
+
 }
 
 
@@ -296,6 +390,7 @@ func (cipher *RastaCTR) FreeAddRoundKey( state, key []*rlwe.Ciphertext) {
 	}
 }
 
+
 func (cipher *RastaCTR) FreeMixColumn( x []*rlwe.Ciphertext ) {
 	plainVec := make([]float64, cipher.params.MaxSlots())
 	for i := 0; i < len(plainVec); i++ {
@@ -305,6 +400,7 @@ func (cipher *RastaCTR) FreeMixColumn( x []*rlwe.Ciphertext ) {
 	for i := 0; i < 351; i++ {
 		stateCopy[i] = x[i].CopyNew()
 	}
+
 	ch := make(chan bool, 351)
 	for i := 0; i < 351; i++ {
 		go func(i int) {
@@ -321,3 +417,31 @@ func (cipher *RastaCTR) FreeMixColumn( x []*rlwe.Ciphertext ) {
 	}	
 	copy(x, stateCopy)
 }
+
+
+// func (cipher *RastaCTR) FreeMixColumnDebug( x []*rlwe.Ciphertext ) {
+// 	plainVec := make([]float64, cipher.params.MaxSlots())
+// 	for i := 0; i < len(plainVec); i++ {
+// 		plainVec[i] = 1
+// 	} 
+// 	stateCopy := make([]*rlwe.Ciphertext, len(x))
+// 	for i := 0; i < 351; i++ {
+// 		stateCopy[i] = x[i].CopyNew()
+// 	}
+
+// 	ch := make(chan bool, 351)
+// 	for i := 0; i < 351; i++ {
+// 		go func(i int) {
+// 			evalCopy := cipher.Evaluator.ShallowCopy()
+// 			for j := 0; j < 351; j++ {
+// 				evalCopy.MulThenAdd(x[j], plainVec, stateCopy[i])
+// 			} 
+// 			evalCopy.Rescale(stateCopy[i], stateCopy[i])
+// 			ch <- true
+// 		}(i)
+// 	}
+// 	for i := 0; i < 351; i++ {
+// 		<-ch
+// 	}	
+// 	copy(x, stateCopy)
+// }

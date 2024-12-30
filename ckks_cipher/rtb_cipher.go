@@ -342,6 +342,21 @@ func (rtb *RtBCipher) DebugPrint(ct *rlwe.Ciphertext, descriptor string) {
 	PrintVectorTrunc( valuesTest, 7, 8 )
 }
 
+func (rtb *RtBCipher) FailureCheck(ct *rlwe.Ciphertext, descriptor string) {
+	valuesTest := make([]float64, ct.Slots())
+	if err := rtb.Decode(rtb.decryptor.DecryptNew(ct), valuesTest); err != nil {
+		panic(err)
+	}
+	for i:=0;i<len(valuesTest);i++{
+		value := math.Abs(valuesTest[i])
+		if ( math.Abs(value - 0) > 0.0001){
+			if ( math.Abs(value - 1) > 0.0001 ){
+				panic("Failed")
+			}
+		} 
+	}
+}
+
 // PrintVectorTrunc prints a truncated version of the vector.
 func PrintVectorTrunc(vec interface{}, printSize, prec int) {
 	switch v := vec.(type) {
