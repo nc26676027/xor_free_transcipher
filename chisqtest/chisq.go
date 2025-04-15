@@ -189,7 +189,7 @@ func FormatInputData(formattedData [][]float64, blockNum int) []uint8 {
     for j := 0; j < numSNP; j++{
 		for k := 0; k < 16; k++{
 			var tmp uint8
-			for ind := 0; ind < 4; ind++{
+			for ind := 3; ind > -1; ind--{
 				snp := uint8(math.Round(formattedData[ 4*k + ind ][j]))
 				if snp > 2{
 					panic("Input SNP feature out of range!\n")
