@@ -1,12 +1,15 @@
 package ckks_cipher
 
 import (
+	"fmt"
+	"math"
 	"strings"
 
 	"crypto/rand"
 	"io"
 
 	"github.com/tuneinsight/lattigo/v6/core/rlwe"
+	"github.com/tuneinsight/lattigo/v6/schemes/ckks"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -258,4 +261,43 @@ func ToFloatVec(boolVec []bool) []float64 {
 // 	fmt.Printf("Rank of the matrix: %d\n", rank)
 // }
 
+// PrintPrecisionStats decrypts, decodes and prints the precision stats of a ciphertext.
+func PrintPrecisionStatsBoolean(params ckks.Parameters, ct *rlwe.Ciphertext, ecd *ckks.Encoder, dec *rlwe.Decryptor) {
 
+	var err error
+
+	// Decrypts the vector of plaintext values
+	pt := dec.DecryptNew(ct)
+
+	// Decodes the plaintext
+	have := make([]float64, params.MaxSlots())
+	if err = ecd.Decode(pt, have); err != nil {
+		panic(err)
+	}
+    want := make([]float64, params.MaxSlots())
+
+	for i:=0;i<len(have);i++{
+		value := math.Abs(have[i])
+		if ( math.Abs( value - want[i] ) > 0.1){
+            want[i] = 1.0
+		} else {
+            want[i] = 0.0
+        }
+	}
+
+	// Pretty prints some values
+	fmt.Printf("Have: ")
+	for i := 0; i < 4; i++ {
+		fmt.Printf("%20.15f ", have[i])
+	}
+	fmt.Printf("...\n")
+
+	fmt.Printf("Want: ")
+	for i := 0; i < 4; i++ {
+		fmt.Printf("%20.15f ", want[i])
+	}
+	fmt.Printf("...\n")
+
+	// Pretty prints the precision stats
+	fmt.Println(ckks.GetPrecisionStats(params, ecd, dec, have, want, 0, false).String())
+}

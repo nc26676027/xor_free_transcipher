@@ -319,6 +319,7 @@ func (eval Evaluator) BootstrapCmplxThenDivide(ctIn0, ctIn1 *rlwe.Ciphertext) (*
 		panic(err)
 	}
 
+	
 	// Step 6 : EvalMod (Homomorphic modular reduction)
 	if real, err = eval.EvalMod(real); err != nil {
 		panic(err)

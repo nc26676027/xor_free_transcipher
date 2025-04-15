@@ -34,7 +34,7 @@ func NewAESCtr(key_ []uint8, params_ ckks.Parameters, btpParams_ bootstrapping.P
 		keySize: 	128,
 		rounds:		10,
         iv:         iv_,
-		allZeroIn: 	true, //debug mode
+		allZeroIn: 	false, //debug mode
     }
 	var monomialOrder []*BitSet
     for i := 0; i < 8; i++ {
@@ -99,7 +99,7 @@ func (aes *AESCtr) DebugTest(ciphertexts []byte, bits int) ([]*rlwe.Ciphertext, 
 	for i := 0; i < 64; i++ {
 		<-ch
 	}	
-
+	PrintPrecisionStatsBoolean(aes.params, state[0], aes.encoder, aes.decryptor)
 	elasp := time.Since(Start)
 	fmt.Println("\n\n\n\nOne round time: ", elasp)
 	// valuesTest := (*aes.encoder).DecodeComplex( (*aes.decryptor).DecryptNew(state[0]), aes.params.LogSlots())
@@ -145,30 +145,20 @@ func (aes *AESCtr) HEDecrypt(ciphertexts []uint8, bits int) []*rlwe.Ciphertext {
 	for i:=0;i<8;i++{
 		str := "Sbox: " + strconv.Itoa(i)
 		aes.DebugPrint(state[i], str)
+		PrintPrecisionStatsBoolean(aes.params, state[i], aes.encoder, aes.decryptor)
 	}
 
+	
 	endAES := time.Now()
 	durationAES := endAES.Sub(startAES)
-	fmt.Printf("代码执行时间：%d 秒 :: %d 毫秒\n", int(durationAES.Seconds()), int(durationAES.Milliseconds())%1000)
+	fmt.Printf("Running time %d s :: %d ms\n", int(durationAES.Seconds()), int(durationAES.Milliseconds())%1000)
 	// // Add cipher
-	// // encode_ciphertext(ciphertexts, num_block);
-	// for i := 0; i < len(state); i++ {
-	// 	if (i%8 == 1) || (i%8 == 2) || (i%8 == 4) || (i%8 == 5) {
-	// 		NOT( evals[0], state[i], state[i])
-	// 	}
-	// }
-
-	// ch := make(chan int, len(state) )
-	// for i := 0; i < len(state); i++ {
-	// 	go func(i int) {
-	// 		XOR(evals[i], state[i], aes.encodeCipher[i], state[i])
-	// 		ch <- i
-	// 	}(i)
-	// }
-	// for i := 0; i < len(state); i++ {
-	// 	<-ch
-	// }
-
+	// aes.EncodeCiphertext(ciphertexts, numBlock);
+	for i := 0; i < len(state); i++ {
+		if (i%8 == 1) || (i%8 == 2) || (i%8 == 4) || (i%8 == 5) {
+			NOT(aes.Evaluator, state[i], state[i])
+		}
+	}
 	return state
 }
 
@@ -207,7 +197,7 @@ func (aes *AESCtr) HEDecryptParam15(ciphertexts []uint8, bits int) []*rlwe.Ciphe
 
 	endAES := time.Now()
 	durationAES := endAES.Sub(startAES)
-	fmt.Printf("代码执行时间：%d 秒 :: %d 毫秒\n", int(durationAES.Seconds()), int(durationAES.Milliseconds())%1000)
+	fmt.Printf("Running time %d s :: %d ms\n", int(durationAES.Seconds()), int(durationAES.Milliseconds())%1000)
 	// // Add cipher
 	// // encode_ciphertext(ciphertexts, num_block);
 	// for i := 0; i < len(state); i++ {
@@ -288,7 +278,7 @@ func (aes *AESCtr) EncryptInput(iv *BitSet, numBlock int) {
 }
 
 func (aes *AESCtr) EncodeCiphertext(ciphertexts []uint8, numBlock int) {
-	aes.encodeCipher = make([]*rlwe.Ciphertext, aes.blockSize)
+	aes.EncodedCT = make([]*rlwe.Ciphertext, aes.blockSize)
 	if numBlock < aes.params.MaxSlots() {
 		fmt.Println("data is not full pack, fill with 0...")
 	}
@@ -304,7 +294,7 @@ func (aes *AESCtr) EncodeCiphertext(ciphertexts []uint8, numBlock int) {
 				encryptedData[i].Set(0)
 			} else {
 				for k := 0; k < aes.blockSize && i*aes.blockSize+k < numBlock*aes.blockSize; k++ {
-					ind := i*aes.blockSize + k
+					ind := i*aes.blockSize + k // i-th column k-th bit in one block	
 					bit := (ciphertexts[ind/8] >> uint(ind%8)) & 1
 					encryptedData[i].bits[k] = uint8(bit)
 				}
@@ -320,9 +310,10 @@ func (aes *AESCtr) EncodeCiphertext(ciphertexts []uint8, numBlock int) {
 		}
 		pt := ckks.NewPlaintext( aes.params, aes.remainingLevel)
 		aes.encoder.Encode(data, pt)
-		aes.encodeCipher[i], _ = aes.encryptor.EncryptNew(pt)
+		aes.EncodedCT[i], _ = aes.encryptor.EncryptNew(pt)
 	}
-	if aes.encodeCipher[0] == nil {panic("encodeCiphertext is nil")}
+
+	if aes.EncodedCT[0] == nil {panic("encodeCiphertext is nil")}
 
 }
 

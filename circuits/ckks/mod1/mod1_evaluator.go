@@ -38,7 +38,7 @@ func (eval Evaluator) EvaluateAndScaleNew(ct *rlwe.Ciphertext, scaling complex12
 	if ct.Level() > evm.LevelQ {
 		eval.DropLevel(ct, ct.Level()-evm.LevelQ)
 	}
-
+	
 	res = ct.CopyNew()
 
 	// Normalize the modular reduction to mod by 1 (division by Q)
@@ -93,7 +93,8 @@ func (eval Evaluator) EvaluateAndScaleNew(ct *rlwe.Ciphertext, scaling complex12
 		mod1Poly = evm.Mod1Poly
 	}
 
-	// Chebyshev evaluation
+
+
 	if res, err = eval.PolynomialEvaluator.Evaluate(res, mod1Poly, rlwe.NewScale(targetScale)); err != nil {
 		return nil, fmt.Errorf("cannot Evaluate: %w", err)
 	}
@@ -158,5 +159,5 @@ func (eval Evaluator) EvaluateAndScaleNew(ct *rlwe.Ciphertext, scaling complex12
 //
 // Scaling back error correction by 2^{round(log(Q))}/Q afterward is included in the polynomial
 func (eval Evaluator) EvaluateNew(ct *rlwe.Ciphertext) (*rlwe.Ciphertext, error) {
-	return eval.EvaluateAndScaleNew(ct, 1)
+	return eval.EvaluateAndScaleNew(ct, complex( 0.25, 0 ))
 }

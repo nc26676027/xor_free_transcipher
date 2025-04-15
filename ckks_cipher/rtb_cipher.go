@@ -21,7 +21,7 @@ type RtBCipher struct {
     symmetricKey	[]uint8
     keyEncrypted	[]*rlwe.Ciphertext
     inputEncrypted	[]*rlwe.Ciphertext
-    encodeCipher	[]*rlwe.Ciphertext
+    EncodedCT	[]*rlwe.Ciphertext
 }
 
 // NewRtBCipher create a new Real to boolean transcipher helper
@@ -42,7 +42,7 @@ func NewRtBCipher( key []uint8, param_ ckks.Parameters, btpParams_ bootstrapping
 		remainingLevel: param_.MaxLevel() - btpParams_.Depth() + btpParams_.SlotsToCoeffsParameters.LevelQ,
 		keyEncrypted: 	make([]*rlwe.Ciphertext, 0),
 		inputEncrypted: make([]*rlwe.Ciphertext, 0),
-		encodeCipher: 	make([]*rlwe.Ciphertext, 0),
+		EncodedCT: 	make([]*rlwe.Ciphertext, 0),
 	}
 	return rtb, nil
 }

@@ -50,6 +50,7 @@ func (eval Evaluator) Evaluate(ct *rlwe.Ciphertext, p interface{}, targetScale r
 	default:
 		phe = p
 	}
+	
 
 	levelsConsumedPerRescaling := eval.Parameters.LevelsConsumedPerRescaling()
 

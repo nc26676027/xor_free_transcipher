@@ -1,4 +1,4 @@
-package main
+package chisqtest
 
 import (
 	"encoding/csv"
@@ -6,15 +6,16 @@ import (
 	"log"
 	"math"
 	"os"
-	"runtime"
 	"strconv"
 	"time"
 
 	"github.com/tuneinsight/lattigo/v6/circuits/ckks/bootstrapping"
+	"github.com/tuneinsight/lattigo/v6/circuits/ckks/dft"
+	"github.com/tuneinsight/lattigo/v6/circuits/ckks/mod1"
+	"github.com/tuneinsight/lattigo/v6/ckks_cipher"
 	"github.com/tuneinsight/lattigo/v6/core/rlwe"
 	"github.com/tuneinsight/lattigo/v6/ring"
 	"github.com/tuneinsight/lattigo/v6/schemes/ckks"
-	"github.com/tuneinsight/lattigo/v6/utils"
 )
 
 
@@ -169,16 +170,49 @@ func BinaryTreeAdd(vector []*rlwe.Ciphertext, evaluator *bootstrapping.Evaluator
 	}
 	return vector[0]
 }
- 
+
+
+func FormatInputData(formattedData [][]float64, blockNum int) []uint8 {
+    var formatedInputData []uint8 // blockNum is MaxSlots
+    numSNP := blockNum //Set to MaxSlots = blockNum in default
+
+    if len(formattedData) < 64 {
+        panic("formattedData must have at least 64 rows")
+    }
+
+    for _, row := range formattedData {
+        if len(row) < numSNP {
+            panic("Each row in formattedData must have at least numSNP elements") // fixed input format
+        }
+    }
+
+    for j := 0; j < numSNP; j++{
+		for k := 0; k < 16; k++{
+			var tmp uint8
+			for ind := 0; ind < 4; ind++{
+				snp := uint8(math.Round(formattedData[ 4*k + ind ][j]))
+				if snp > 2{
+					panic("Input SNP feature out of range!\n")
+				}
+                bits := snp
+                tmp = (tmp << 2) | bits
+			}
+			formatedInputData = append(formatedInputData, tmp)
+		}
+	}
+
+	return formatedInputData
+}
+
 
 func RunChi2(SNPDir, SNPFileName, pValue, Runtime, SampleSize, SNPs string) {
 	N, err := strconv.Atoi(SampleSize)
 	if err != nil {
-		log.Fatalf("SampleSize转换错误: %v", err)
+		log.Fatalf("SampleSize transform error: %v", err)
 	}
 	M, err := strconv.Atoi(SNPs)
 	if err != nil {
-		log.Fatalf("SNPs转换错误: %v", err)
+		log.Fatalf("SNPs transform error: %v", err)
 	}
 	scalingFactor := 0.1*math.Pow(float64(N), -2)
 
@@ -186,7 +220,6 @@ func RunChi2(SNPDir, SNPFileName, pValue, Runtime, SampleSize, SNPs string) {
 	var sData [][]float64
 	var yData []float64
 
-	startTime := time.Now()
 
 	err = ReadSNPFile(&headersS, &sData, &yData, SNPDir+"/"+SNPFileName, N, M)
 	if err != nil {
@@ -200,33 +233,112 @@ func RunChi2(SNPDir, SNPFileName, pValue, Runtime, SampleSize, SNPs string) {
 	fmt.Println("Number of SNPs =", len(sData[0]))
 	fmt.Println("Number of yData =", len(yData))
 
-	workingLevel := 3 // Specify the working level to reduce Mul complexity
+	// AES transcipher process
+	LogN := 15
+	LogDefaultScale := 35
 
-	LogN := 16
+	q0 := []int{36}                                    // 3) ScaleDown & 4) ModUp
+	qiSlotsToCoeffs := []int{35, 35}               // 1) SlotsToCoeffs
+	// qiCircuitSlots := []int{35, 35, 35}           // 0) Circuit in the slot domain
+	qiCircuitSlots := []int{ 35, 35, 35 }           // 0) Circuit in the slot domain
+	qiEvalMod := []int{36, 36, 36, 36, 36, 36, 36} // 6) EvalMod
+	qiCoeffsToSlots := []int{34, 34, 34, 34}           // 5) CoeffsToSlots
+	
+	workingLevel := len(qiSlotsToCoeffs) + len(qiCircuitSlots) // Specify the working level to reduce Mul complexity
+	
+	LogQ := append(q0, qiSlotsToCoeffs...)
+	LogQ = append(LogQ, qiCircuitSlots...)
+	LogQ = append(LogQ, qiEvalMod...)
+	LogQ = append(LogQ, qiCoeffsToSlots...)
+
 	params, err := ckks.NewParametersFromLiteral(ckks.ParametersLiteral{
 		LogN:            LogN,                                              // Log2 of the ring degree
-		LogQ:            []int{58, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42}, // Log2 of the ciphertext prime moduli
-		LogP:            []int{61, 61, 61, 61, 61},                                 // Log2 of the key-switch auxiliary prime moduli
-		LogDefaultScale: 42,                                                // Log2 of the scale
-		Xs:              ring.Ternary{H: 192},
+		LogQ:            LogQ, // Log2 of the ciphertext prime moduli
+		LogP:            []int{36, 36, 36, 36, 36},                                 // Log2 of the key-switch auxiliary prime moduli
+		LogDefaultScale: LogDefaultScale,                                                // Log2 of the scale
+		Xs:              ring.Ternary{H: 256},
 	})
-	btpParametersLit := bootstrapping.ParametersLiteral{
-		// We specify LogN to ensure that both the residual parameters and the bootstrapping parameters
-		// have the same LogN. This is not required, but we want it for this example.
-		LogN: utils.Pointy(LogN),
-
-		// In this example we need manually specify the number of auxiliary primes (i.e. #Pi) used by the
-		// evaluation keys of the bootstrapping circuit, so that the size of LogQP  meets the security target.
-		LogP: []int{61, 61, 61, 61, 61},
-
-		// In this example we manually specify the bootstrapping parameters' secret distribution.
-		// This is not necessary, but we ensure here that they are the same as the residual parameters.
-		Xs: params.Xs(),
-	}
-	btpParams, err := bootstrapping.NewParametersFromLiteral(params, btpParametersLit)
 	if err != nil {
 		panic(err)
 	}
+
+	// CoeffsToSlots parameters (homomorphic encoding)
+	CoeffsToSlotsParameters := dft.MatrixLiteral{
+		Type:         dft.HomomorphicEncode,
+		Format:       dft.RepackImagAsReal, // Returns the real and imaginary part into separate ciphertexts
+		LogSlots:     params.LogMaxSlots(),
+		LevelQ:       params.MaxLevelQ(),
+		LevelP:       params.MaxLevelP(),
+		LogBSGSRatio: 1,
+		Levels:       []int{1, 1, 1, 1}, //qiCoeffsToSlots
+	}
+
+	// Parameters of the homomorphic modular reduction x mod 1
+	Mod1ParametersLiteral := mod1.ParametersLiteral{
+		LevelQ:          params.MaxLevel() - CoeffsToSlotsParameters.Depth(true),
+		LogScale:        36,               // Matches qiEvalMod
+		Mod1Type:        mod1.CosDiscrete, // Multi-interval Chebyshev interpolation
+		Mod1Degree:      120,               // Depth 5
+		DoubleAngle:     0,                // Depth 3
+		K:               14,               // With EphemeralSecretWeight = 32 and 2^{15} slots, ensures < 2^{-138.7} failure probability
+		LogMessageRatio: 1,               // q/|m| = 2^10
+		Mod1InvDegree:   0,                // Depth 0
+	}
+
+	// SlotsToCoeffs parameters (homomorphic decoding)
+	SlotsToCoeffsParameters := dft.MatrixLiteral{
+		Type:         dft.HomomorphicDecode,
+		LogSlots:     params.LogMaxSlots(),
+		LogBSGSRatio: 1,
+		LevelP:       params.MaxLevelP(),
+		Levels:       []int{1, 1}, // qiSlotsToCoeffs
+	}
+
+	SlotsToCoeffsParameters.LevelQ = len(SlotsToCoeffsParameters.Levels)
+
+	// Custom bootstrapping.Parameters.
+	// All fields are public and can be manually instantiated.
+	btpParams := bootstrapping.Parameters{
+		ResidualParameters:      params,
+		BootstrappingParameters: params,
+		SlotsToCoeffsParameters: SlotsToCoeffsParameters,
+		Mod1ParametersLiteral:   Mod1ParametersLiteral,
+		CoeffsToSlotsParameters: CoeffsToSlotsParameters,
+		EphemeralSecretWeight:   32, // > 128bit secure for LogN=16 and LogQP = 115.
+		CircuitOrder:            bootstrapping.DecodeThenModUp,
+	}
+
+
+	// We print some information about the residual parameters.
+	fmt.Printf("Residual parameters: logN=%d, logSlots=%d, H=%d, sigma=%f, logQP=%f, levels=%d, scale=2^%d\n",
+		btpParams.ResidualParameters.LogN(),
+		btpParams.ResidualParameters.LogMaxSlots(),
+		btpParams.ResidualParameters.XsHammingWeight(),
+		btpParams.ResidualParameters.Xe(), params.LogQP(),
+		btpParams.ResidualParameters.MaxLevel(),
+		btpParams.ResidualParameters.LogDefaultScale())
+
+	// And some information about the bootstrapping parameters.
+	// We can notably check that the LogQP of the bootstrapping parameters is smaller than 1550, which ensures
+	// 128-bit of security as explained above.
+	fmt.Printf("Bootstrapping parameters: logN=%d, logSlots=%d, H(%d; %d), sigma=%f, logQP=%f, levels=%d, scale=2^%d\n",
+		btpParams.BootstrappingParameters.LogN(),
+		btpParams.BootstrappingParameters.LogMaxSlots(),
+		btpParams.BootstrappingParameters.XsHammingWeight(),
+		btpParams.EphemeralSecretWeight,
+		btpParams.BootstrappingParameters.Xe(),
+		btpParams.BootstrappingParameters.LogQP(),
+		btpParams.BootstrappingParameters.QCount(),
+		btpParams.BootstrappingParameters.LogDefaultScale())
+
+	// Scheme context and keys
+
+	//===========================
+	//=== 4) KEYGEN & ENCRYPT ===
+	//===========================
+
+	// Now that both the residual and bootstrapping parameters are instantiated, we can
+	// instantiate the usual necessary object to encode, encrypt and decrypt.
 
 	// Scheme context and keys
 	kgen := rlwe.NewKeyGenerator(params)
@@ -236,39 +348,74 @@ func RunChi2(SNPDir, SNPFileName, pValue, Runtime, SampleSize, SNPs string) {
 	encoder := ckks.NewEncoder(params)
 	decryptor := rlwe.NewDecryptor(params, sk)
 	encryptor := rlwe.NewEncryptor(params, pk)
-	step := M // Collect half  ind1 || ind2 with each 16384 SNPs of total 32768 SNPs
-	galEls := params.GaloisElements( []int{step} )
-	evk, _, err := btpParams.GenEvaluationKeysWithOthers(sk, galEls)
+
+	fmt.Println()
+	fmt.Println("Generating bootstrapping evaluation keys...")
+	evk, _, err := btpParams.GenEvaluationKeys(sk)
 	if err != nil {
 		panic(err)
 	}
-	var eval *bootstrapping.Evaluator
-	if eval, err = bootstrapping.NewEvaluator(btpParams, evk); err != nil {
-		panic(err)
+	fmt.Println("Done")
+
+	//========================
+	//=== 5) BOOTSTRAPPING ===
+	//========================
+	iv := make([]uint8, 16)
+	symmetricKey := []byte{ // All zero symmetric key for debugging
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+    }
+	// symmetricKey := []byte{
+    //     0xff, 0xff, 0xff, 0xff,
+    //     0xff, 0xff, 0xff, 0xff,
+    //     0xff, 0xff, 0xff, 0xff,
+    //     0xff, 0xff, 0xff, 0xff,
+    // }
+	aes, _ := ckks_cipher.NewAESCtr(symmetricKey, params, btpParams, evk, encoder, encryptor, decryptor, iv) 
+	// Encode the ciphertext into plain polynomimal
+	// aes.HEDecrypt(symmetricKey, 128 )
+	fmt.Println("aes.Parameters.LogMaxSlots(): ", params.MaxSlots())
+	formatedData := FormatInputData(sData, params.MaxSlots())	
+	aes.EncodeCiphertext(formatedData, params.MaxSlots())
+
+	// Transciphering process is finished, thereby subsequent chisqtest is as follows
+	eval := aes.ShallowCopy()
+
+	startTime := time.Now()
+
+	sCiphertexts := make([]*rlwe.Ciphertext, N) // N is the sample Size, i.e., the individual number
+	if len(sCiphertexts) != len(aes.EncodedCT)/2 {
+		fmt.Println("sCiphertext length: ", len(sCiphertexts), ", EncodedCT length: ", len(aes.EncodedCT))
+		panic("Required SNP ciphertext length not match Transciphred data!")
 	}
-	
-	sCiphertexts := make([]*rlwe.Ciphertext, N/2)
-	
-	for i := 0; i < N/2; i++ {
-		individual := make([]float64, 2*M)
-		copy(individual[:M], sData[i])
-		copy(individual[M:], sData[N/2 + i])
-		S := ckks.NewCiphertext(params, 1, workingLevel)
-		plaintext := ckks.NewPlaintext(params, workingLevel)
-		encoder.Encode( individual, plaintext )
-		encryptor.Encrypt(plaintext, S)
-		for S.Level() > workingLevel {
-			eval.DropLevel(S, 1)
-		}
-		sCiphertexts[i] = S
+	for i := 0; i < N; i++{
+		sCiphertexts[i], _ = eval.AddNew(aes.EncodedCT[2*i], aes.EncodedCT[2*i+1])
+		eval.Add(aes.EncodedCT[2*i+1], sCiphertexts[i], sCiphertexts[i])
 	}
 
-	yCiphertexts := make([]*rlwe.Ciphertext, N/2)
-	for i := 0; i < N/2; i++ {
-		individual := make([]float64, 2*M)
+	for i := 0; i < N/2; i++{
+		str := "CT[" + strconv.Itoa(i) + "]: "
+		printDebug(str, params, sCiphertexts[i], decryptor, encoder)
+	}
+	
+	// for i := 0; i < N; i++ {
+	// 	S := ckks.NewCiphertext(params, 1, workingLevel)
+	// 	plaintext := ckks.NewPlaintext(params, workingLevel)
+	// 	encoder.Encode( sData[i], plaintext )
+	// 	encryptor.Encrypt(plaintext, S)
+	// 	for S.Level() > workingLevel {
+	// 		eval.DropLevel(S, 1)
+	// 	}
+	// 	sCiphertexts[i] = S
+	// }
+
+	yCiphertexts := make([]*rlwe.Ciphertext, N)
+	for i := 0; i < N; i++ {
+		individual := make([]float64, M)
 		for j:=0;j<M;j++{
 			individual[j] = yData[i]
-			individual[j+M] = yData[N/2 + i]
 		}
 		plaintext := ckks.NewPlaintext(params, workingLevel)
 		encoder.Encode( individual, plaintext )
@@ -305,50 +452,22 @@ func RunChi2(SNPDir, SNPFileName, pValue, Runtime, SampleSize, SNPs string) {
 	yU := BinaryTreeAdd(ySum, eval)
 
 	var chiD, chiN, orD, orN *rlwe.Ciphertext 
-	ySMult := make([]*rlwe.Ciphertext, N/2)
+	ySMult := make([]*rlwe.Ciphertext, N)
 
-	for i := 0; i < N/2; i++ {
-		ySMult[i], err = eval.MulRelinNew(sCiphertexts[i], yCiphertexts[i])
+	for i := 0; i < N; i++ {
+		ySMult[i], _ = eval.MulRelinNew(sCiphertexts[i], yCiphertexts[i])
 		eval.Rescale(ySMult[i], ySMult[i])
 	}
-	// var wg sync.WaitGroup // 用于等待所有goroutine完成的同步工具
-	// for i := 0; i < N/2; i++ {
-	// 	wg.Add(1) // 增加等待计数
-	// 	go func(i int) { // 使用goroutine并发执行
-	// 		defer wg.Done() // 完成时减少等待计数
-	// 		// 执行操作，假设这些方法是线程安全的
-	// 		ySMult[i] = evaluator.ShallowCopy().MulRelinNew(sCiphertexts[i], yCiphertexts[i])
-	// 		evaluator.ShallowCopy().RescaleMany(ySMult[i], 1, ySMult[i])
-	// 	}(i) // 传递当前索引i
-	// }
-	// wg.Wait() // 等待所有goroutine完成
-
 
 	n11 := BinaryTreeAdd(ySMult, eval)
 	c1 := BinaryTreeAdd(sCiphertexts, eval)
 	
-	//Rotate step
-	n11Rot, err := eval.RotateNew(n11, step)
-	eval.Add(n11, n11Rot, n11)
-	if err != nil {
-		panic(err)
-	}
-	c1Rot, err := eval.RotateNew(c1, step)
-	eval.Add(c1, c1Rot, c1)
-	if err != nil {
-		panic(err)
-	}
-	yURot, err := eval.RotateNew(yU, step)
-	eval.Add(yU, yURot, yU)
-	if err != nil {
-		panic(err)
-	}
 	printDebug( "n11: ", params, n11, decryptor, encoder)
 	printDebug( "c1: ", params, c1, decryptor, encoder)
 	printDebug( "yU: ", params, yU, decryptor, encoder)
 
 	// r1 = 2 * yU
-	r1, err := eval.AddNew(yU, yU)
+	r1, _ := eval.AddNew(yU, yU)
 	r1Scaled, err := eval.MulNew(r1, float64(scalingFactor) )
 	if err != nil {
 		panic(err)
@@ -380,7 +499,7 @@ func RunChi2(SNPDir, SNPFileName, pValue, Runtime, SampleSize, SNPs string) {
 		panic(err)
 	}
 	// denominator
-	negC1Scaled, err := eval.MulNew(c1Scaled, -1)
+	negC1Scaled, _ := eval.MulNew(c1Scaled, -1)
 	chiD1, err := eval.AddNew(negC1Scaled, dScaled)
 	if err != nil {
 		panic(err)
@@ -390,8 +509,8 @@ func RunChi2(SNPDir, SNPFileName, pValue, Runtime, SampleSize, SNPs string) {
 		panic(err)
 	}
 	eval.Rescale(chiD1, chiD1)
-	negR1Scaled, err := eval.MulNew(r1Scaled, -1)
-	chiD2, err := eval.AddNew(negR1Scaled, dScaled)
+	negR1Scaled, _ := eval.MulNew(r1Scaled, -1)
+	chiD2, _ := eval.AddNew(negR1Scaled, dScaled)
 	chiD2, err = eval.MulRelinNew(chiD2, r1)
 	eval.Rescale(chiD2, chiD2)
 	if err != nil {
@@ -403,26 +522,26 @@ func RunChi2(SNPDir, SNPFileName, pValue, Runtime, SampleSize, SNPs string) {
 		panic(err)
 	}
 	// Odds Ratio
-	n11Scaled, err := eval.MulNew(n11, float64(scalingFactor) )
+	n11Scaled, _ := eval.MulNew(n11, float64(scalingFactor) )
 	eval.Rescale(n11Scaled, n11Scaled)
 	
 	// denominator
-	or2, err := eval.SubNew(c1, n11)
-	or3, err := eval.SubNew(r1Scaled, n11Scaled)
+	or2, _ := eval.SubNew(c1, n11)
+	or3, _ := eval.SubNew(r1Scaled, n11Scaled)
+
 	orD, err = eval.MulRelinNew(or2, or3)
 	eval.Rescale(orD, orD)
 	if err != nil {
 		panic(err)
 	}
-	// numerator
-	or1, err := eval.SubNew(n11Scaled, r1Scaled)
-	or1, err = eval.SubNew(or1, c1Scaled)
-	or1, err = eval.AddNew(or1, dScaled)
-	eval.Rescale(or1, or1)
-	
-	orN, err = eval.MulRelinNew(n11, or1)
-	eval.Rescale(orN, orN)
 
+	// numerator
+	or1, _ := eval.SubNew(n11Scaled, r1Scaled)
+	or1, _ = eval.SubNew(or1, c1Scaled)
+	or1, _ = eval.AddNew(or1, dScaled)
+	
+	orN, _ = eval.MulRelinNew(n11, or1)
+	eval.Rescale(orN, orN)
 	endToEndTime := float64(time.Since(start).Seconds())
 
 
@@ -517,19 +636,4 @@ func printDebug( str string, params ckks.Parameters, ciphertext *rlwe.Ciphertext
 	fmt.Printf("Level: %d (logQ = %d)\n", ciphertext.Level(), params.LogQLvl(ciphertext.Level()))
 	fmt.Printf("Scale: 2^%f\n", ciphertext.LogScale())
 	fmt.Printf("ValuesTest: %6.10f %6.10f %6.10f %6.10f...\n", valuesTest[0], valuesTest[1], valuesTest[2], valuesTest[3])
-}
-
-
-func main() {
-	runtime.GOMAXPROCS(64)
-	// ./chi2 --SNPdir "../data" --SNPfilename "random_sample" --pvalue "pvalue.txt" --runtime "result.txt" --samplesize="200" --snps="16384"
-	    // 定义命令行参数
-	SNPDir := "data"
-	SNPFileName := "random_sample"
-	pValue := "pvalue.txt"
-	Runtime := "result.txt"
-	SampleSize := "200"
-	SNPs := "16384"
-	RunChi2(SNPDir, SNPFileName, pValue, Runtime, SampleSize, SNPs);
-
 }

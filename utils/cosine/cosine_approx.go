@@ -64,8 +64,8 @@ func cos2PiXMinusQuarterOverR(x, r *big.Float) (y *big.Float) {
 	// z = 1 - cos(2 * pi * x) 
 	z := bignum.NewFloat(1.0, EncodingPrecision)
 	z.Sub(z, y)
-	two := bignum.NewFloat(4.0, EncodingPrecision)
-	z.Quo(z, two)
+	// two := bignum.NewFloat(2.0, EncodingPrecision)
+	// z.Quo(z, two)
 
 	return z
 }

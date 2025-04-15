@@ -15,8 +15,8 @@ func main() {
 	runtime.GOMAXPROCS(64)
 	// Default LogN, which with the following defined parameters
 	// provides a security of 128-bit.
-	ckks_cipher.RastaParam13(10, 512)
-	// ckks_cipher.AESParam14()
+	// ckks_cipher.RastaParam14()
+	ckks_cipher.AESParam14()
 	// ckks_cipher.AESParam13()
 }
 
