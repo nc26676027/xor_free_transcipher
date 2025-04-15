@@ -395,10 +395,10 @@ func RunChi2(SNPDir, SNPFileName, pValue, Runtime, SampleSize, SNPs string) {
 		eval.Add(aes.EncodedCT[2*i+1], sCiphertexts[i], sCiphertexts[i])
 	}
 
-	for i := 0; i < N/2; i++{
-		str := "CT[" + strconv.Itoa(i) + "]: "
-		printDebug(str, params, sCiphertexts[i], decryptor, encoder)
-	}
+	// for i := 0; i < N/2; i++{
+	// 	str := "CT[" + strconv.Itoa(i) + "]: "
+	// 	printDebug(str, params, sCiphertexts[i], decryptor, encoder)
+	// }
 	
 	// for i := 0; i < N; i++ {
 	// 	S := ckks.NewCiphertext(params, 1, workingLevel)
