@@ -310,11 +310,17 @@ func AESParam13() {
 }
 
 
-func AESParam14() {
+func AESParam14(flag_mode int) {
 	// Default LogN, which with the following defined parameters
 	// provides a security of 128-bit.
-	
 	LogN := 10
+
+	if flag_mode == 0 {
+		LogN = 10
+	} else {
+		LogN = 15
+	}
+	
 	LogDefaultScale := 35
 
 	q0 := []int{36}                                    // 3) ScaleDown & 4) ModUp
@@ -439,18 +445,18 @@ func AESParam14() {
 	//=== 5) BOOTSTRAPPING ===
 	//========================
 	iv := make([]uint8, 16)
-	// symmetricKey := []byte{
-    //     0x00, 0x00, 0x00, 0x00,
-    //     0x00, 0x00, 0x00, 0x00,
-    //     0x00, 0x00, 0x00, 0x00,
-    //     0x00, 0x00, 0x00, 0x00,
-    // }
 	symmetricKey := []byte{
-        0xff, 0xff, 0xff, 0xff,
-        0xff, 0xff, 0xff, 0xff,
-        0xff, 0xff, 0xff, 0xff,
-        0xff, 0xff, 0xff, 0xff,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
     }
+	// symmetricKey := []byte{
+    //     0xff, 0xff, 0xff, 0xff,
+    //     0xff, 0xff, 0xff, 0xff,
+    //     0xff, 0xff, 0xff, 0xff,
+    //     0xff, 0xff, 0xff, 0xff,
+    // }
 	aes, _ := NewAESCtr(symmetricKey, params, btpParams, evk, encoder, encryptor, decryptor, iv) 
 	aes.HEDecrypt(symmetricKey, 128 )
 	// aes.DebugTest(symmetricKey, 128)
